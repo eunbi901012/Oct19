@@ -1,0 +1,16 @@
+node_modules
+.git
+dist
+build
+.next
+coverage
+target
+**/node_modules
+**/target
+playwright-report
+test-results
+*.log
+.env
+.env.*
+*.pem
+*.key

@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.next/
+coverage/
+.vite/
+.cache/
+*.local
+target/
+*.log
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+playwright-report/
+test-results/
+/frontend/.auth/
+.idea/
+.vscode/
+.DS_Store
+# Runner staging inputs are not generated deliverables; never force-add them.
+/codegen-context/
+/.aiops-spec/
+
+# Playwright verifier artifacts
+**/test-results/
+**/playwright-report/

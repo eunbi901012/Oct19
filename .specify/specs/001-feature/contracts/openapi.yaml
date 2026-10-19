@@ -1,0 +1,2065 @@
+openapi: 3.0.3
+info:
+  title: oct19 공통 관리 REST 계약
+  version: 0.1.0
+  description: 동기 imperative/blocking MyBatis 설계. 400/401/403·DTO 명명은 기술 제안이다. 정책 미확인 OQ는 승인으로 취급하지 않으며 구현 착수 시 해결해야 한다. source_id와
+    canonical_id를 분리한다.
+servers:
+- url: http://localhost:8080
+  description: 로컬 Compose backend 포트 설계 제안
+tags:
+- name: 공통 관리
+  description: 사용자·조직·역할·메뉴·코드
+security:
+- bearerAuth: []
+paths:
+  /api/users:
+    get:
+      operationId: searchUsers
+      summary: 사용자 관리 조회
+      x-related-requirements:
+      - REQ-001
+      - REQ-002
+      - REQ-003
+      - REQ-037
+      - REQ-049
+      x-implementation-constraints:
+      - canonical_id: REQ-037
+        description: 이 조회와 /admin/users의 연동 실행은 spring_boot 3.3.x, node 20.x, vite 5.x, react 18.x, postgres 16.x의 Version BOM을 따른다. 패치 버전은 OQ-TECH-001이며 응답에 버전 필드를 추가하지 않는다.
+        source: requirement-registry.json의 REQ-037 statement 및 source_locator (SPEC-REQUEST.md:104)
+      - canonical_id: REQ-049
+        description: preview 또는 quickstart에서 이 API의 조회 결과와 /admin/users의 표시 결과를 함께 검증한다. API 응답 성공만으로 화면 검증 완료를 주장하지 않는다.
+        source: requirement-registry.json의 REQ-049 statement 및 source_locator (SPEC-REQUEST.md:131)
+      x-required-tests:
+      - 'compatibility: REQ-037의 BOM으로 구성한 실행 환경에서 교번 조건으로 searchUsers 호출 -> 200, success=true이며 /admin/users에 같은 employee_number의 행이 표시된다. BOM의 각 버전 일치 여부는 별도 의존성·이미지 검사로 확인한다'
+      - 'integration: preview 또는 quickstart에서 /admin/users에 교번 조건을 입력해 검색 -> GET /api/users 응답 data와 화면의 employee_number/person_name/position/retired_on/last_synced_at가 동일하다(REQ-049)'
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: employee_number
+        description: 교번 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: person_name
+        description: 성명 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: organization_code
+        description: 소속 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: job_grade
+        description: 직급 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: employment_status
+        description: 재직상태 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: business_roles
+        description: 역할 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: enabled
+        description: 사용여부 조회 조건
+        schema:
+          type: boolean
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/User'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: updateUserSettings
+      summary: 사용자 관리 저장
+      x-related-requirements:
+      - REQ-003
+      - REQ-004
+      - REQ-034
+      x-implementation-constraints:
+      - canonical_id: REQ-034
+        description: users.enabled 저장과 후속 searchUsers 재조회는 PostgreSQL 영속성을 사용한다. PostgreSQL 선택은 실행 제약이며 새로운 업무 동작이나 DB 관리 API를 뜻하지 않는다.
+        source: requirement-registry.json의 REQ-034 statement 및 source_locator (SPEC-REQUEST.md:80)
+      x-state-transitions:
+      - users.enabled의 기존 boolean 값 -> 요청한 boolean 값 저장(REQ-003). 사용중지에 따른 접속 차단 정책은 OQ-DATA-002이며 비활성 정책으로 단정하지 않는다.
+      x-business-rules:
+      - 인사 원천 필드 employee_number/person_name/organization_code/job_grade/employment_status/position/retired_on/last_synced_at는
+        수정 요청에서 거부한다(REQ-004).
+      - 사용여부만 로컬 설정으로 변경한다. 업무 역할 변경은 saveUserRoleAssignment가 담당한다(REQ-003).
+      x-side-effects:
+      - users.enabled를 갱신한다. 인사 원천 컬럼은 기존 값으로 남는다.
+      x-required-tests:
+      - 'happy: 기존 user_id와 변경할 enabled 전송 -> 후속 searchUsers에서 users.enabled가 변경값이다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/users에 저장 요청 -> 403, users 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: person_name을 수정 본문에 포함 -> 400 field_errors.field=person_name이고 users.person_name은 불변'
+      - 'business: KORUS employee_number 변경 시도 -> 400 및 users.employee_number 기존값 유지(REQ-004)'
+      - 'persistence: PostgreSQL에 존재하는 user_id의 enabled를 변경한 뒤 독립 DB 연결과 searchUsers로 재조회 -> users.enabled와 응답 enabled가 제출값이며 원천 employee_number는 기존값이다(REQ-034, REQ-003, REQ-004)'
+      - 'side-effect: users.enabled를 갱신한다. 인사 원천 컬럼은 기존 값으로 남는다. -> DB snapshot과 후속 조회로 해당 필드 및 비간섭 테이블을 비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/User'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/organizations:
+    get:
+      operationId: getOrganizationRelations
+      summary: 조직 관리 조회
+      x-related-requirements:
+      - REQ-005
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: organization_code
+        description: 조직코드 조회 조건
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Organization'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+      x-history-reference: listOrganizationRelationHistory는 이전 parent_code와 valid_from/valid_to를 반환한다.
+    put:
+      operationId: saveOrganizationRelation
+      summary: 조직 관리 저장
+      x-related-requirements:
+      - REQ-006
+      - REQ-008
+      - REQ-007
+      - REQ-047
+      x-implementation-constraints:
+      - canonical_id: REQ-047
+        description: 이 저장 operation의 실행·영속성 설계는 plan.md의 exact marker+JSON block을 보존하고 생성된 9개 문서의 semantic SSOT로 확정한다는 원문 제약을 따른다. spec.md에 명시된 imperative/mybatis/blocking 결정을 투영하며 marker의 실제 문자열은 허용 입력에 없어 확인 필요다. 이 operation이 plan.md를 수정하거나 검증 결과를 반환하지는 않는다.
+        source: requirement-registry.json의 REQ-047 statement 및 source_locator (SPEC-REQUEST.md:125)
+      x-business-rules:
+      - 상위조직과 적용 시작일·종료일을 함께 저장하고 이전 관계·기간은 조회 가능하게 보존한다(REQ-006, REQ-007).
+      - users.organization_code/position 및 user_role_assignments를 직접 갱신하지 않는다(REQ-008). 기간 포함·중복·순환 정책은 OQ-ORG-001.
+      x-side-effects:
+      - organization_relations에 상위조직·기간 관계를 기록한다. 이전 관계 행을 삭제하지 않는다.
+      x-required-tests:
+      - 'happy: 조직·새 상위조직·기간 전송 -> 후속 getOrganizationRelations에 새 parent_code/valid_from/valid_to가 표시된다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/organizations에 저장 요청 -> 403, organizations 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: organization_code 누락 -> 400 field_errors.field=organization_code이며 organization_relations 행 증가 없음'
+      - 'business: 조직 관계 변경 전후 사용자 snapshot 비교 -> users.organization_code/position와 역할 부여가 동일(REQ-008); 중복기간 거부값은 OQ-ORG-001
+        승인 후 확정'
+      - 'side-effect: organization_relations에 상위조직·기간 관계를 기록한다. 이전 관계 행을 삭제하지 않는다. -> DB snapshot과 후속 조회로 해당 필드 및 비간섭 테이블을
+        비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Organization'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/roles:
+    get:
+      operationId: listRoles
+      summary: 역할 관리 조회
+      x-related-requirements:
+      - REQ-009
+      - REQ-010
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: role_id
+        description: 역할 식별정보 조회 조건
+        schema:
+          type: string
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Role'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: saveRole
+      summary: 역할 관리 저장
+      x-related-requirements:
+      - REQ-009
+      - REQ-010
+      - REQ-011
+      x-business-rules:
+      - role_id는 다른 역할과 식별 가능해야 한다(REQ-010).
+      - purpose/grant_criteria/default_data_scope만 역할 정의로 저장하며 사용자 부여내역은 바꾸지 않는다(REQ-009, REQ-011).
+      x-side-effects:
+      - roles.purpose/grant_criteria/default_data_scope를 저장한다. user_role_assignments는 변경하지 않는다.
+      x-required-tests:
+      - 'happy: 역할 식별정보와 목적·기준·기본범위 전송 -> listRoles의 roles 필드가 저장값이다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/roles에 저장 요청 -> 403, roles 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: role_id 누락 -> 400 field_errors.field=role_id이며 roles 변경 없음'
+      - 'business: 역할 정의만 변경 -> user_role_assignments의 대상·role_id·기간은 변경 전과 동일(REQ-011)'
+      - 'side-effect: roles.purpose/grant_criteria/default_data_scope를 저장한다. user_role_assignments는 변경하지 않는다. -> DB snapshot과
+        후속 조회로 해당 필드 및 비간섭 테이블을 비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Role'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/user-role-assignments:
+    get:
+      operationId: listUserRoleAssignments
+      summary: 사용자 역할 관리 조회
+      x-related-requirements:
+      - REQ-012
+      - REQ-013
+      - REQ-014
+      - REQ-015
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: user_id
+        description: 대상 사용자 조회 조건
+        schema:
+          type: string
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/UserRoleAssignment'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: saveUserRoleAssignment
+      summary: 사용자 역할 관리 저장
+      x-related-requirements:
+      - REQ-003
+      - REQ-012
+      - REQ-013
+      - REQ-015
+      x-business-rules:
+      - 동일 사용자에게 다른 역할·다른 유효기간을 부여할 수 있다(REQ-012).
+      - 부여·변경·회수 각각 user_id/role_id/valid_from/valid_to/approver_id를 저장한다(REQ-013). 승인자 자동 대입은 금지하며 검증 절차는 OQ-ROLE-001.
+      - 종료된 기간의 역할은 현재 적용 역할에서 제외한다(REQ-015). 종료일의 정확한 경계는 OQ-ORG-001.
+      x-side-effects:
+      - user_role_assignments에 대상·역할·기간·승인자·action을 저장한다. origin은 기존 출처를 보존하며 신규 수동 부여는 수동으로 기록한다.
+      x-required-tests:
+      - 'happy: 동일 사용자에 서로 다른 role_id와 기간으로 두 번 부여 -> listUserRoleAssignments에 두 부여 및 각각의 유효기간이 보인다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/user-role-assignments에 저장 요청 -> 403, user_role_assignments 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: approver_id 누락 -> 400 field_errors.field=approver_id이며 user_role_assignments 변경 없음'
+      - 'business: 이미 유효기간이 종료된 역할을 포함한 사용자 요청 -> 현재 적용 판정에서 해당 role_id 제외(REQ-015); 기간 경계는 승인 후 실행'
+      - 'side-effect: user_role_assignments에 대상·역할·기간·승인자·action을 저장한다. origin은 기존 출처를 보존하며 신규 수동 부여는 수동으로 기록한다. -> DB snapshot과
+        후속 조회로 해당 필드 및 비간섭 테이블을 비교한다.'
+      - 'sequence: 부여·변경·회수 각 요청 뒤 재조회 -> 매 요청의 user_id/role_id/valid_from/valid_to/approver_id/action이 저장값이다(REQ-013)'
+      - 'state: 종료된 역할과 유효한 역할이 함께 존재 -> 종료된 role_id만 현재 적용에서 제외되며, 시작·종료일 경계값은 OQ-ORG-001 해결 후 확정한다(REQ-015)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRoleAssignmentInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserRoleAssignment'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+      x-state-transitions:
+      - 유효기간 종료 전 역할 -> 종료된 역할은 현재 적용 역할에서 제외(REQ-015); action=회수의 효력 시점은 OQ-ROLE-001 승인 후 확정
+  /api/menu-permissions:
+    get:
+      operationId: listMenuPermissions
+      summary: 메뉴 권한 관리 조회
+      x-related-requirements:
+      - REQ-016
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: role_id
+        description: 역할 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: organization_code
+        description: 조직 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: user_id
+        description: 사용자 조회 조건
+        schema:
+          type: string
+      - in: query
+        name: menu_id
+        description: 메뉴 조회 조건
+        schema:
+          type: string
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/MenuPermission'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: saveMenuPermission
+      summary: 메뉴 권한 관리 저장
+      x-related-requirements:
+      - REQ-016
+      - REQ-017
+      - REQ-018
+      x-state-transitions:
+      - 선택 대상·menu_id 설정의 allowed 기존값 -> 요청한 boolean 값 저장(REQ-016). 실효 허용·거부의 조합 및 우선순위는 OQ-AUTH-001이며 기본 거부나 deny 우선을 확정하지 않는다.
+      x-business-rules:
+      - 역할·조직·사용자와 메뉴의 선택 대상에 대한 allowed를 저장한다(REQ-016). 대상 조합·우선순위는 OQ-AUTH-001.
+      - 실효 권한이 거부로 결정된 메뉴는 숨기고 URL 요청도 서버에서 차단한다(REQ-017, REQ-018).
+      x-side-effects:
+      - menu_permissions.allowed 및 대상·menu_id를 저장한다. 후속 메뉴 렌더링과 서버 가드는 승인된 권한 판정을 사용한다.
+      x-required-tests:
+      - 'happy: 승인된 대상과 메뉴에 allowed 전송 -> listMenuPermissions에서 해당 menu_id/대상의 allowed가 저장값이다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/menu-permissions에 저장 요청 -> 403, menu_permissions 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: allowed를 boolean이 아닌 값으로 전송 -> 400 field_errors.field=allowed이며 menu_permissions 변경 없음'
+      - 'business: 실효 거부 대상으로 직접 해당 메뉴 URL 요청 -> 403, 보호된 업무 데이터와 menu_permissions 변경 없음(REQ-018)'
+      - 'side-effect: menu_permissions.allowed 및 대상·menu_id를 저장한다. 후속 메뉴 렌더링과 서버 가드는 승인된 권한 판정을 사용한다. -> DB snapshot과 후속 조회로
+        해당 필드 및 비간섭 테이블을 비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MenuPermissionInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/MenuPermission'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/menu-structure:
+    get:
+      operationId: getMenuStructure
+      summary: 메뉴 구조 관리 조회
+      x-related-requirements:
+      - REQ-019
+      - REQ-020
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: parent_menu_id
+        description: 부모메뉴 조회 조건
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/MenuStructure'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: saveMenuStructure
+      summary: 메뉴 구조 관리 저장
+      x-related-requirements:
+      - REQ-019
+      - REQ-020
+      - REQ-021
+      x-business-rules:
+      - 부모메뉴·계층단계 및 동일 부모 아래 표시순서를 저장한다(REQ-019, REQ-020).
+      - 다른 부모 아래의 display_order를 변경하지 않는다(REQ-021).
+      x-side-effects:
+      - menus.parent_menu_id/level/display_order를 저장한다. 다른 부모의 행은 유지한다.
+      x-required-tests:
+      - 'happy: 같은 부모의 메뉴 display_order 변경 -> getMenuStructure에서 저장한 순서로 조회된다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/menu-structure에 저장 요청 -> 403, menus 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: display_order를 정수가 아닌 값으로 전송 -> 400 field_errors.field=display_order이며 menus 변경 없음'
+      - 'business: 부모가 다른 메뉴와 함께 snapshot 후 한 부모 순서 변경 -> 다른 부모의 display_order는 동일(REQ-021)'
+      - 'side-effect: menus.parent_menu_id/level/display_order를 저장한다. 다른 부모의 행은 유지한다. -> DB snapshot과 후속 조회로 해당 필드 및 비간섭 테이블을
+        비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MenuStructureInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/MenuStructure'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/menu-execution-info:
+    get:
+      operationId: listMenuExecutionInfo
+      summary: 메뉴 정보 관리 조회
+      x-related-requirements:
+      - REQ-022
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: menu_id
+        description: 메뉴 조회 조건
+        schema:
+          type: string
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/MenuExecutionInfo'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: saveMenuExecutionInfo
+      summary: 메뉴 정보 관리 저장
+      x-related-requirements:
+      - REQ-022
+      - REQ-024
+      x-business-rules:
+      - menu_id에 연결된 screen_id/url을 저장한다(REQ-022).
+      - menu_permissions 행을 변경하지 않는다(REQ-024). URL 안전성 허용 범위는 OQ-UI-003.
+      x-side-effects:
+      - menu_execution_info.screen_id/url을 저장한다. menu_permissions는 유지한다.
+      x-required-tests:
+      - 'happy: menu_id와 screen_id/url 전송 -> listMenuExecutionInfo에서 같은 실행정보가 조회된다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/menu-execution-info에 저장 요청 -> 403, menu_execution_info 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: screen_id 누락 -> 400 field_errors.field=screen_id이며 menu_execution_info 변경 없음'
+      - 'business: 실행정보 변경 전후 권한 비교 -> menu_permissions.allowed와 대상은 동일(REQ-024)'
+      - 'side-effect: menu_execution_info.screen_id/url을 저장한다. menu_permissions는 유지한다. -> DB snapshot과 후속 조회로 해당 필드 및 비간섭
+        테이블을 비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MenuExecutionInfoInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/MenuExecutionInfo'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/code-groups:
+    get:
+      operationId: listCodeGroups
+      summary: 코드그룹 관리 조회
+      x-related-requirements:
+      - REQ-025
+      - REQ-026
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: group_id
+        description: 그룹ID 조회 조건
+        schema:
+          type: string
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CodeGroup'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+    put:
+      operationId: saveCodeGroup
+      summary: 코드그룹 관리 저장
+      x-related-requirements:
+      - REQ-025
+      - REQ-027
+      x-business-rules:
+      - group_id별 name/description/managing_department를 저장한다(REQ-025).
+      - 그룹 정의 변경은 detail_codes의 code와 다른 필드를 바꾸지 않는다(REQ-027).
+      x-side-effects:
+      - code_groups.name/description/managing_department를 저장한다. detail_codes는 유지한다.
+      x-required-tests:
+      - 'happy: group_id와 명칭·설명·관리부서 전송 -> listCodeGroups에서 해당 그룹 값이 조회된다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/code-groups에 저장 요청 -> 403, code_groups 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: group_id 누락 -> 400 field_errors.field=group_id이며 code_groups 변경 없음'
+      - 'business: 상세코드가 존재하는 그룹 명칭 변경 -> detail_codes.code/sort_order/parent_code는 동일(REQ-027)'
+      - 'side-effect: code_groups.name/description/managing_department를 저장한다. detail_codes는 유지한다. -> DB snapshot과 후속 조회로 해당
+        필드 및 비간섭 테이블을 비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodeGroupInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CodeGroup'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/detail-codes:
+    get:
+      operationId: listDetailCodes
+      summary: 상세코드 관리 조회
+      x-related-requirements:
+      - REQ-028
+      - REQ-029
+      - REQ-030
+      - REQ-031
+      parameters:
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: group_id
+        description: 코드그룹 조회 조건
+        schema:
+          type: string
+        required: true
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DetailCode'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      x-filtering-status: 원문 조건 외 ID 선택은 편집 대상 식별을 위한 설계 제안. 조건 조합 방식·기본 정렬·page/size 기본값은 확인 필요. page/size는 기술 제안으로 명시 전달한다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+      description: 선택한 group_id의 상세코드만 sort_order 순서로 반환한다. group_id가 없으면 400. 계층은 parent_code로 식별한다.
+    put:
+      operationId: saveDetailCode
+      summary: 상세코드 관리 저장
+      x-related-requirements:
+      - REQ-029
+      - REQ-030
+      - REQ-031
+      x-business-rules:
+      - 선택한 group_id에 속한 code의 정렬순서와 상위코드를 저장한다(REQ-029, REQ-030, REQ-031). 추가 명시 필드는 OQ-UI-002.
+      - 선택값 조회는 저장된 sort_order에 따른다(REQ-030).
+      x-side-effects:
+      - detail_codes.sort_order/parent_code 및 확인된 명시 필드를 저장한다. 그룹별 조회·선택 순서가 반영된다.
+      x-required-tests:
+      - 'happy: group_id/code/sort_order/parent_code 전송 -> listDetailCodes에서 저장한 순서·상위코드가 조회된다'
+      - 'auth: 승인 후 실효 거부로 결정된 주체가 /api/detail-codes에 저장 요청 -> 403, detail_codes 변경 없음 (OQ-AUTH-001 선행)'
+      - 'validation: sort_order를 정수가 아닌 값으로 전송 -> 400 field_errors.field=sort_order이며 detail_codes 변경 없음'
+      - 'business: 서로 다른 그룹에 코드 배치 후 한 그룹 선택 -> 다른 group_id의 code가 조회·선택값에 섞이지 않음(REQ-028)'
+      - 'side-effect: detail_codes.sort_order/parent_code 및 확인된 명시 필드를 저장한다. 그룹별 조회·선택 순서가 반영된다. -> DB snapshot과 후속 조회로 해당
+        필드 및 비간섭 테이블을 비교한다.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetailCodeInput'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DetailCode'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      description: 저장 대상 식별자를 본문에 전달하는 동기 저장 설계다. 기존 식별자는 선택 응답에서 전달하고, 신규 역할 부여·메뉴 설정의 opaque ID는 frontend 내부 UUID로 생성·재시도
+        보존한다. 승인자 검증·선택 대상 조합은 관련 OQ가 해결되어야 한다. 아래 required와 400/401/403 및 ID 생성은 기술 계약 제안이다.
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/organization-relation-history:
+    get:
+      operationId: listOrganizationRelationHistory
+      summary: 조직관계 변경 전 이력
+      x-related-requirements:
+      - REQ-007
+      parameters:
+      - in: query
+        name: organization_code
+        description: 이력을 확인할 조직코드
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: page
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: size
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/OrganizationRelation'
+                    pagination:
+                      $ref: '#/components/schemas/PageMeta'
+                  required:
+                  - data
+                  - pagination
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-001: 관리 권한 보유자(역할 코드 승인 대기)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/accessible-menus:
+    get:
+      operationId: getAccessibleMenus
+      summary: 사용자 접근 가능 메뉴
+      x-related-requirements:
+      - REQ-017
+      - REQ-020
+      - REQ-023
+      - REQ-046
+      x-implementation-constraints:
+      - canonical_id: REQ-046
+        description: 이 응답을 소비하는 공통 navigation의 레이아웃·컴포넌트·시각 규칙·검증 기준은 ui-design.md에 명시해야 한다. API는 접근 가능한 메뉴 데이터만 제공하며 시각 설계를 응답 필드나 새로운 화면으로 바꾸지 않는다. 구체 레퍼런스 자산·색상·반응형 임계값은 OQ-UI-004다.
+        source: requirement-registry.json의 REQ-046 statement 및 source_locator (SPEC-REQUEST.md:124)
+      x-pagination:
+        enabled: false
+        reason: 현재 사용자 한 명의 탐색 트리를 하나의 결과 집합으로 반환한다. 크기 상한·대규모 전략은 OQ-TECH-001.
+      description: menus의 부모·순서와 menu_execution_info의 screen_id/url을 조합하여 실효 권한이 허용한 항목만 반환한다. 권한 조합·실행 가능 판정은 OQ-AUTH-001/OQ-UI-003.
+        일반 사용자 읽기 scope는 관리 편집 scope와 별도 승인해야 한다.
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AccessibleMenuResult'
+                  required:
+                  - data
+        '400':
+          description: 입력 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: 인증 부재 또는 무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: 허용되지 않은 접근
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - bearerAuth: []
+      x-roles:
+      - 'OQ-AUTH-002: 인증된 사용자 중 허용된 메뉴 읽기 주체(정확한 역할 코드 미정)'
+      x-authorization-status: 설계 제안; 실제 인증·역할 코드·scope는 OQ-AUTH-001 승인 필요
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: 서비스 상태 확인
+      security: []
+      x-related-requirements:
+      - REQ-041
+      - REQ-050
+      x-implementation-constraints:
+      - canonical_id: REQ-050
+        description: 이 서비스를 Compose로 빌드하는 각 build context 디렉터리에는 .dockerignore를 두고 node_modules, .git, dist, build, .next, coverage를 제외한다. context가 ..이면 해당 저장소 루트에 둔다. health 응답은 파일 제외 여부를 증명하지 않으므로 각 context와 빌드 입력을 별도로 검사해야 하며 파일 검사 endpoint는 추가하지 않는다.
+        source: requirement-registry.json의 REQ-050 statement 및 source_locator (SPEC-REQUEST.md:132)
+      x-required-tests:
+      - 'deployment: REQ-050의 각 build context 제외 집합을 검사한 Compose 이미지로 backend 실행 후 GET /api/health -> 200, success=true, meta 및 data.status=UP를 반환한다. .dockerignore 충족 여부는 응답과 별도로 각 context의 제외 집합 검사 결과에서 확인한다'
+      responses:
+        '200':
+          description: 정상 결과
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ApiResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Health'
+                  required:
+                  - data
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'OQ-AUTH-001 미해결: 기관 인증 또는 검증용 인증의 승인 전 제안일 뿐이며 로그인 API를 임의 생성하지 않는다.'
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        meta:
+          type: object
+          properties:
+            request_id:
+              type: string
+              description: 기술적 요청 추적자
+      required:
+      - success
+      - meta
+    ApiError:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        meta:
+          type: object
+          properties:
+            request_id:
+              type: string
+        code:
+          type: string
+        message:
+          type: string
+        field_errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+            required:
+            - field
+            - message
+      required:
+      - success
+      - meta
+      - code
+      - message
+    AssignmentOrigin:
+      type: string
+      enum:
+      - 보직 기반
+      - 수동
+      description: 원문 구분의 wire 값 제안; 자동 부여 기준은 OQ-ROLE-001
+    AssignmentAction:
+      type: string
+      enum:
+      - 부여
+      - 변경
+      - 회수
+      description: 원문 명시 명령; 회수 효력·보존 정책은 미확인
+    PageMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+      required:
+      - page
+      - size
+      - total
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          description: 기술적 준비상태; 정상일 때 UP
+      required:
+      - status
+    User:
+      type: object
+      properties:
+        user_id:
+          type: string
+        employee_number:
+          type: string
+        person_name:
+          type: string
+        organization_code:
+          type: string
+        job_grade:
+          type: string
+        employment_status:
+          type: string
+        business_roles:
+          type: array
+          items:
+            type: string
+          description: 현재 적용 역할 식별정보 projection. 유효기간이 종료된 역할은 제외(REQ-015); 기간 경계·회수 효력은 OQ-ORG-001/OQ-ROLE-001.
+        enabled:
+          type: boolean
+        position:
+          type: string
+        retired_on:
+          type: string
+          format: date
+          nullable: true
+        last_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - user_id
+      - employee_number
+      - person_name
+      - organization_code
+      - job_grade
+      - employment_status
+      - business_roles
+      - enabled
+      - position
+      - retired_on
+      - last_synced_at
+    Organization:
+      type: object
+      properties:
+        organization_code:
+          type: string
+        organization_type:
+          type: string
+        parent_code:
+          type: string
+        child_codes:
+          type: array
+          items:
+            type: string
+        valid_from:
+          type: string
+          format: date
+          nullable: true
+        valid_to:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - organization_code
+      - organization_type
+      - parent_code
+      - child_codes
+      - valid_from
+      - valid_to
+    Role:
+      type: object
+      properties:
+        role_id:
+          type: string
+        purpose:
+          type: string
+        grant_criteria:
+          type: string
+        default_data_scope:
+          type: string
+      required:
+      - role_id
+      - purpose
+      - grant_criteria
+      - default_data_scope
+    UserRoleAssignment:
+      type: object
+      properties:
+        assignment_id:
+          type: string
+        user_id:
+          type: string
+        role_id:
+          type: string
+        valid_from:
+          type: string
+          format: date
+          nullable: true
+        valid_to:
+          type: string
+          format: date
+          nullable: true
+        approver_id:
+          type: string
+        origin:
+          $ref: '#/components/schemas/AssignmentOrigin'
+        action:
+          $ref: '#/components/schemas/AssignmentAction'
+        is_current:
+          type: boolean
+          description: 기간 종료 역할 제외의 관찰 가능한 계산 결과(REQ-015). 물리 상태 enum/컬럼이 아니며 경계 정책은 승인 필요.
+      required:
+      - assignment_id
+      - user_id
+      - role_id
+      - valid_from
+      - valid_to
+      - approver_id
+      - origin
+      - action
+      - is_current
+    MenuPermission:
+      type: object
+      properties:
+        permission_id:
+          type: string
+        role_id:
+          type: string
+          nullable: true
+          description: 해당 대상이 선택되지 않은 설정은 null로 반환한다. 대상 조합·우선순위는 OQ-AUTH-001이며 세 대상을 모두 요구하는 의미가 아니다.
+        organization_code:
+          type: string
+          nullable: true
+          description: 해당 대상이 선택되지 않은 설정은 null로 반환한다. 대상 조합·우선순위는 OQ-AUTH-001이며 세 대상을 모두 요구하는 의미가 아니다.
+        user_id:
+          type: string
+          nullable: true
+          description: 해당 대상이 선택되지 않은 설정은 null로 반환한다. 대상 조합·우선순위는 OQ-AUTH-001이며 세 대상을 모두 요구하는 의미가 아니다.
+        menu_id:
+          type: string
+        allowed:
+          type: boolean
+      required:
+      - permission_id
+      - role_id
+      - organization_code
+      - user_id
+      - menu_id
+      - allowed
+    MenuStructure:
+      type: object
+      properties:
+        menu_id:
+          type: string
+        parent_menu_id:
+          type: string
+        level:
+          type: integer
+        display_order:
+          type: integer
+      required:
+      - menu_id
+      - parent_menu_id
+      - level
+      - display_order
+    MenuExecutionInfo:
+      type: object
+      properties:
+        menu_id:
+          type: string
+        screen_id:
+          type: string
+        url:
+          type: string
+      required:
+      - menu_id
+      - screen_id
+      - url
+    CodeGroup:
+      type: object
+      properties:
+        group_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        managing_department:
+          type: string
+      required:
+      - group_id
+      - name
+      - description
+      - managing_department
+    DetailCode:
+      type: object
+      properties:
+        group_id:
+          type: string
+        code:
+          type: string
+        sort_order:
+          type: integer
+        parent_code:
+          type: string
+      required:
+      - group_id
+      - code
+      - sort_order
+      - parent_code
+    OrganizationRelation:
+      type: object
+      properties:
+        relation_id:
+          type: string
+        organization_code:
+          type: string
+        parent_code:
+          type: string
+        valid_from:
+          type: string
+          format: date
+          nullable: true
+        valid_to:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - relation_id
+      - organization_code
+      - parent_code
+      - valid_from
+      - valid_to
+    UserInput:
+      type: object
+      properties:
+        user_id:
+          type: string
+        enabled:
+          type: boolean
+      required:
+      - user_id
+      - enabled
+      additionalProperties: false
+    OrganizationInput:
+      type: object
+      properties:
+        organization_code:
+          type: string
+        parent_code:
+          type: string
+        valid_from:
+          type: string
+          format: date
+          nullable: true
+        valid_to:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - organization_code
+      - parent_code
+      - valid_from
+      - valid_to
+      additionalProperties: false
+    RoleInput:
+      type: object
+      properties:
+        role_id:
+          type: string
+        purpose:
+          type: string
+        grant_criteria:
+          type: string
+        default_data_scope:
+          type: string
+      required:
+      - role_id
+      - purpose
+      - grant_criteria
+      - default_data_scope
+      additionalProperties: false
+    UserRoleAssignmentInput:
+      type: object
+      properties:
+        assignment_id:
+          type: string
+          description: 부여 버튼은 화면 내부에서 새 UUID를 생성해 전송하고 재시도 시 같은 값을 보존한다. 변경·회수는 선택한 응답 assignment_id를 재사용한다. 사용자 입력 필드가 아니다.
+        user_id:
+          type: string
+        role_id:
+          type: string
+        valid_from:
+          type: string
+          format: date
+          nullable: true
+        valid_to:
+          type: string
+          format: date
+          nullable: true
+        approver_id:
+          type: string
+        action:
+          $ref: '#/components/schemas/AssignmentAction'
+      required:
+      - assignment_id
+      - user_id
+      - role_id
+      - valid_from
+      - valid_to
+      - approver_id
+      - action
+      additionalProperties: false
+    MenuPermissionInput:
+      type: object
+      properties:
+        permission_id:
+          type: string
+          description: 조회된 설정은 응답 permission_id를 보존한다. 아직 설정이 없는 대상·메뉴 저장은 화면 내부 UUID를 생성하고 재시도 시 유지한다. 사용자 입력 필드가 아니다.
+        role_id:
+          type: string
+          nullable: true
+          description: 미선택 대상은 생략 또는 null; 응답은 null. 선택 대상 조합 승인 전 우선순위나 결합 규칙을 확정하지 않는다.
+        organization_code:
+          type: string
+          nullable: true
+          description: 미선택 대상은 생략 또는 null; 응답은 null. 선택 대상 조합 승인 전 우선순위나 결합 규칙을 확정하지 않는다.
+        user_id:
+          type: string
+          nullable: true
+          description: 미선택 대상은 생략 또는 null; 응답은 null. 선택 대상 조합 승인 전 우선순위나 결합 규칙을 확정하지 않는다.
+        menu_id:
+          type: string
+        allowed:
+          type: boolean
+      required:
+      - permission_id
+      - menu_id
+      - allowed
+      additionalProperties: false
+      anyOf:
+      - required:
+        - role_id
+        properties:
+          role_id:
+            type: string
+            minLength: 1
+      - required:
+        - organization_code
+        properties:
+          organization_code:
+            type: string
+            minLength: 1
+      - required:
+        - user_id
+        properties:
+          user_id:
+            type: string
+            minLength: 1
+    MenuStructureInput:
+      type: object
+      properties:
+        menu_id:
+          type: string
+        parent_menu_id:
+          type: string
+        level:
+          type: integer
+        display_order:
+          type: integer
+      required:
+      - menu_id
+      - parent_menu_id
+      - level
+      - display_order
+      additionalProperties: false
+    MenuExecutionInfoInput:
+      type: object
+      properties:
+        menu_id:
+          type: string
+        screen_id:
+          type: string
+        url:
+          type: string
+      required:
+      - menu_id
+      - screen_id
+      - url
+      additionalProperties: false
+    CodeGroupInput:
+      type: object
+      properties:
+        group_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        managing_department:
+          type: string
+      required:
+      - group_id
+      - name
+      - description
+      - managing_department
+      additionalProperties: false
+    DetailCodeInput:
+      type: object
+      properties:
+        group_id:
+          type: string
+        code:
+          type: string
+        sort_order:
+          type: integer
+        parent_code:
+          type: string
+      required:
+      - group_id
+      - code
+      - sort_order
+      additionalProperties: false
+    AccessibleMenuResult:
+      type: object
+      properties:
+        menus:
+          type: array
+          items:
+            type: object
+            properties:
+              menu_id:
+                type: string
+              parent_menu_id:
+                type: string
+              display_order:
+                type: integer
+              screen_id:
+                type: string
+              url:
+                type: string
+            required:
+            - menu_id
+            - parent_menu_id
+            - display_order
+            - screen_id
+            - url
+      required:
+      - menus
+x-uncovered-requirements:
+- canonical_id: REQ-032
+  status: non-functional
+  evidence: React/TypeScript/Vite 번들 선택은 frontend/package.json의 빌드 의존성 계약이며 REST 입출력이 아니다.
+- canonical_id: REQ-033
+  status: non-functional
+  evidence: Java 17/Spring Boot 선택은 backend/pom.xml과 런타임의 컴파일 계약이다.
+
+- canonical_id: REQ-035
+  status: non-functional
+  evidence: Docker Compose 실행 방식은 infra/docker-compose.yml의 서비스 연결 책임이다.
+- canonical_id: REQ-036
+  status: non-functional
+  evidence: 동기 blocking MyBatis는 plan.md marker의 실행 결정으로 모든 요청 처리 내부에 적용된다.
+
+- canonical_id: REQ-038
+  status: non-functional
+  evidence: backend 디렉터리 산출 여부는 저장소 파일 검사 대상이다.
+- canonical_id: REQ-039
+  status: non-functional
+  evidence: frontend 디렉터리 산출 여부는 저장소 파일 검사 대상이다.
+- canonical_id: REQ-040
+  status: non-functional
+  evidence: Compose 파일 위치는 infra/docker-compose.yml 파일 존재와 config 검사로 확인한다.
+- canonical_id: REQ-042
+  status: non-functional
+  evidence: 레퍼런스의 sidebar/header/밀도/토큰/반응형은 ui-design.md 공통 시각 설계이며 API를 만들지 않는다.
+- canonical_id: REQ-043
+  status: non-functional
+  evidence: spec.md 기술스택 계약에서 백엔드·프론트엔드 범위를 문서화한다.
+- canonical_id: REQ-044
+  status: non-functional
+  evidence: plan.md Project Structure와 생성 순서가 소유하는 구현 배치 계약이다.
+- canonical_id: REQ-045
+  status: non-functional
+  evidence: tasks.md Setup/Foundational/US 단계가 backend/frontend/infra 작업을 배정한다.
+
+- canonical_id: REQ-048
+  status: data-constraint
+  evidence: data-model.md Entity Registry와 tasks.md migration 작업이 스키마 기준을 충족한다.
