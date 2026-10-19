@@ -1,0 +1,56 @@
+name: oct19
+services:
+  database:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-oct19}
+      POSTGRES_USER: ${POSTGRES_USER:-oct19}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Inject POSTGRES_PASSWORD externally}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+  backend:
+    image: oct19-backend:1.0.0
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    pull_policy: build
+    environment:
+      DATABASE_URL: jdbc:postgresql://database:5432/${POSTGRES_DB:-oct19}
+      DATABASE_USER: ${POSTGRES_USER:-oct19}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Inject POSTGRES_PASSWORD externally}
+    ports:
+      - "8080:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+  frontend:
+    image: oct19-frontend:1.0.0
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    pull_policy: build
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+volumes:
+  postgres-data:

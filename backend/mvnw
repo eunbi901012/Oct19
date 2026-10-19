@@ -1,0 +1,38 @@
+#!/bin/sh
+# Jar-free Maven launcher. Downloads only when explicitly invoked by the runner.
+set -eu
+BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROPERTIES="$BASE_DIR/.mvn/wrapper/maven-wrapper.properties"
+DISTRIBUTION_URL=
+while IFS='=' read -r key value; do
+    case "$key" in distributionUrl) DISTRIBUTION_URL=$value ;; esac
+done < "$PROPERTIES"
+EXPECTED_URL=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.tar.gz
+if [ "$DISTRIBUTION_URL" != "$EXPECTED_URL" ]; then
+    printf '%s\n' 'Unsupported Maven distribution URL; review launcher and properties together.' >&2
+    exit 1
+fi
+MAVEN_CACHE="${MAVEN_USER_HOME:-$HOME/.m2}/wrapper/dists/apache-maven-3.9.9"
+MAVEN_EXEC="$MAVEN_CACHE/apache-maven-3.9.9/bin/mvn"
+if [ ! -x "$MAVEN_EXEC" ]; then
+    command -v curl >/dev/null 2>&1 || { printf '%s\n' 'curl is required for Maven bootstrap.' >&2; exit 1; }
+    command -v sha512sum >/dev/null 2>&1 || { printf '%s\n' 'sha512sum is required.' >&2; exit 1; }
+    mkdir -p "$MAVEN_CACHE"
+    TEMP_DIR=$(mktemp -d "$MAVEN_CACHE/bootstrap.XXXXXX")
+    trap 'rm -rf "$TEMP_DIR"' EXIT HUP INT TERM
+    curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "$DISTRIBUTION_URL" -o "$TEMP_DIR/maven.tar.gz"
+    curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        "$DISTRIBUTION_URL.sha512" -o "$TEMP_DIR/maven.sha512"
+    EXPECTED_SHA=$(tr -d '[:space:]' < "$TEMP_DIR/maven.sha512")
+    [ "${#EXPECTED_SHA}" -eq 128 ] || { printf '%s\n' 'Invalid Maven checksum.' >&2; exit 1; }
+    printf '%s  %s\n' "$EXPECTED_SHA" "$TEMP_DIR/maven.tar.gz" | sha512sum --check --status
+    tar -xzf "$TEMP_DIR/maven.tar.gz" -C "$TEMP_DIR"
+    # Atomic rename: concurrent bootstrap processes must not merge partial trees.
+    if ! mv -T "$TEMP_DIR/apache-maven-3.9.9" "$MAVEN_CACHE/apache-maven-3.9.9" 2>/dev/null; then
+        [ -x "$MAVEN_EXEC" ] || exit 1
+    fi
+    rm -rf "$TEMP_DIR"
+    trap - EXIT HUP INT TERM
+fi
+exec "$MAVEN_EXEC" -f "$BASE_DIR/pom.xml" "$@"
